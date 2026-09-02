@@ -1,8 +1,10 @@
 {
   "$comment": [
     "VS Code MCP config for the intranet Confluence connector.",
-    "Copy into .vscode/mcp.json (per workspace) or your user mcp.json,",
-    "then replace the absolute path and the CONFLUENCE_BASE_URL host.",
+    "Merge into your USER mcp.json (Command Palette > MCP: Open User Configuration,",
+    "i.e. ~/Library/Application Support/Code/User/mcp.json) so it works in every workspace.",
+    "If that file already has servers, add these entries instead of overwriting it.",
+    "Then replace the absolute path and the CONFLUENCE_BASE_URL host.",
     "The token is prompted for and stored by VS Code, never written to this file."
   ],
   "inputs": [

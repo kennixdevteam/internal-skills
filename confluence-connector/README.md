@@ -10,16 +10,41 @@
 
 > 個 token 有幾大權限，個 connector 就淨係做到幾多嘢。想再保險，開個唔可以寫嘅 account，或者設 `CONFLUENCE_READONLY=1`。
 
-## 2. 設定 VS Code
+## 2. 設定 VS Code（user 層級）
 
-抄 `config.example.json` 去 workspace 嘅 `.vscode/mcp.json`（或者你 user 嘅 `mcp.json`），改兩樣：
+Confluence connector 係**你個人嘅 tool**，跟你部機同你個 Confluence account 走，唔跟住某一個 repo，所以要裝喺 **user 層級嘅 `mcp.json`**，唔好放喺 project 嘅 `.vscode/mcp.json`。
 
-- `args` 入面條路徑改成呢個 repo 嘅絕對路徑
+開個 file：Command Palette（`⇧⌘P`）→ **MCP: Open User Configuration**。macOS 實際路徑係：
+
+```
+~/Library/Application Support/Code/User/mcp.json
+```
+
+抄 `config.example.json` 入面 `inputs` 同 `servers` 兩忽落去，改兩樣：
+
+- `args` 入面條路徑改成呢個 repo 喺你機上面嘅絕對路徑
 - `CONFLUENCE_BASE_URL` 改成你哋內聯 Confluence 嘅 host（連 context path，例如 `https://wiki.internal.example/confluence`）
+
+如果個 file 已經有其他 server（例如 `jira-connector`），**唔好覆蓋成個 file** —— 將 `inputs` 嘅 entry 加入去原本個 array，將 `confluence-connector` 加入去原本個 `servers` object：
+
+```jsonc
+{
+  "inputs": [
+    { "id": "jira-token", "type": "promptString", "description": "Jira personal access token", "password": true },
+    { "id": "confluence-token", "type": "promptString", "description": "Confluence personal access token", "password": true }
+  ],
+  "servers": {
+    "jira-connector": { /* ... */ },
+    "confluence-connector": { /* ... */ }
+  }
+}
+```
 
 Token 唔好寫入 file —— 個 config 用 VS Code 嘅 `${input:confluence-token}`，第一次會彈窗問你，之後由 VS Code 保管。
 
-改完喺 Copilot Chat 開 agent mode，個 `confluence-connector` server 就會出現喺 tool list。
+設定完之後，**任何 workspace** 開 Copilot Chat agent mode 都見到 `confluence-connector` 喺 tool list，唔使逐個 repo 再設一次。
+
+> 想淨係喺某一個 project 出現（例如個 repo 用另一個 Confluence space / instance），先至抄去嗰個 workspace 嘅 `.vscode/mcp.json`。留意嗰個 file 會 commit 入 repo，所以入面唔可以有 token。
 
 ## 3. 驗證
 
