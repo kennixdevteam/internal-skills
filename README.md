@@ -24,4 +24,5 @@ Command Palette（`⇧⌘P`）→ **MCP: Open User Configuration** →
 | Folder | 做乜 |
 |---|---|
 | [jira-connector](jira-connector/) | 讀寫內聯 Jira 嘅 MCP server。讀 ticket 全部內容（連 parent chain、epic 下所有 ticket、sprint、customer tag、link、@mention）；可開新 ticket 同 comment；改 ticket 要先出 diff 俾用戶確認；冇 delete。 |
+| [jira-issue-research](jira-issue-research/) | 純讀嘅搜尋 workflow。俾一個或多個 project + 一段問題描述，自己拆 keyword 砌 JQL 去搵相關舊 ticket，逐張讀完判斷相關性，歸納出「呢類問題之前係點處理」並列明每個結論由邊張 ticket 支持。用 jira-connector 嘅 tool，唔會寫入。[十個用法](jira-issue-research/README.md)。 |
 | [confluence-connector](confluence-connector/) | 讀寫內聯 Confluence 嘅 MCP server。一次過讀一個 list 嘅 page，自動跟住內文嘅 Confluence link 讀落去；可開新 page 同 comment；改 page 要行 preview → confirm → apply 三段式；冇 delete、冇 trash、冇 archive。 |

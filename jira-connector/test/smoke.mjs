@@ -100,7 +100,20 @@ function startFakeJira() {
       if (p === "/rest/api/3/issue" && req.method === "POST") return json(201, { id: "10100", key: "PROJ-100" });
       if (p === "/rest/agile/1.0/epic/PROJ-9/issue")
         return json(200, { issues: [{ key: "PROJ-1", fields: { summary: "Login page throws 500", status: { name: "In Progress" }, issuetype: { name: "Bug" } } }, { key: "PROJ-4", fields: { summary: "Rotate keys", status: { name: "To Do" }, issuetype: { name: "Task" } } }] });
-      if (p === "/rest/api/3/search/jql") return json(200, { issues: [] });
+      if (p === "/rest/api/3/search/jql") {
+        // A broad query returns one page of many; a narrow one returns everything.
+        if (!/BROAD/.test(body?.jql || "")) return json(200, { issues: [] });
+        if (body.nextPageToken === "tok2")
+          return json(200, { issues: [{ key: "PROJ-3", fields: { summary: "Third", status: { name: "Done" }, issuetype: { name: "Bug" } } }] });
+        return json(200, {
+          issues: [
+            { key: "PROJ-1", fields: { summary: "First", status: { name: "Done" }, issuetype: { name: "Bug" } } },
+            { key: "PROJ-2", fields: { summary: "Second", status: { name: "Done" }, issuetype: { name: "Bug" } } },
+          ],
+          nextPageToken: "tok2",
+        });
+      }
+      if (p === "/rest/api/3/search/approximate-count") return json(200, { count: 3000 });
       return json(404, { errorMessages: [`no route ${p}`] });
     });
     srv.listen(0, "127.0.0.1", () => resolve({ srv, port: srv.address().port }));
@@ -273,6 +286,30 @@ check("all traffic stayed on the configured host", () => {
 });
 
 const { JiraClient } = await import("../mcp/jira-client.mjs");
+const broad = await call("jira_search", { jql: "project = ABC AND text ~ BROAD", limit: 2 });
+check("search reports the real total instead of silently truncating", () => {
+  assert.equal(broad.data.count, 2);
+  assert.equal(broad.data.total, 3000, "approximate-count should fill in the total v3 omits");
+  assert.equal(broad.data.truncated, true);
+  assert.equal(broad.data.next_cursor, "tok2");
+  assert.match(broad.data.note, /Narrow the JQL/);
+});
+
+const page2 = await call("jira_search", { jql: "project = ABC AND text ~ BROAD", limit: 2, cursor: broad.data.next_cursor });
+check("search follows next_cursor to the following page", () => {
+  assert.deepEqual(page2.data.issues.map((i) => i.key), ["PROJ-3"]);
+  assert.equal(page2.data.truncated, false);
+  assert.equal(page2.data.next_cursor, null);
+  assert.ok(!("note" in page2.data), "a complete page should carry no truncation note");
+});
+
+const narrow = await call("jira_search", { jql: "project = ABC AND text ~ nothing" });
+check("a complete result is not flagged as truncated", () => {
+  assert.equal(narrow.data.count, 0);
+  assert.equal(narrow.data.truncated, false);
+  assert.equal(narrow.data.next_cursor, null);
+});
+
 const c = new JiraClient({ JIRA_BASE_URL: `http://127.0.0.1:${port}`, JIRA_TOKEN: "t" });
 await c.request("DELETE", "/rest/api/3/issue/PROJ-1").then(
   () => { results.push("  FAIL  client blocks DELETE\n        DELETE was allowed"); process.exitCode = 1; },

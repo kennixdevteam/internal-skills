@@ -27,24 +27,70 @@ async function fetchIssue(client, key, { comments = true } = {}) {
   return normaliseIssue(client, raw, { includeComments: comments });
 }
 
-async function searchIssues(client, jql, limit = 50) {
+const SEARCH_FIELDS = ["summary", "status", "issuetype", "assignee"];
+
+// Ask Jira how many issues a JQL matches without pulling them. Cloud's
+// /search/jql dropped `total`, so this is the only way to know the real size
+// there; on builds that lack the endpoint we just report null.
+async function approximateCount(client, jql) {
+  try {
+    const res = await client.api("POST", "/search/approximate-count", { body: { jql } });
+    return Number.isFinite(res?.count) ? res.count : null;
+  } catch {
+    return null;
+  }
+}
+
+// Returns { issues, total, next_cursor, truncated }.
+//
+// `truncated` is the important one: a caller that gets 200 issues back must be
+// able to tell "that is all of them" from "that is the first page of 3000",
+// otherwise it will summarise a slice and present it as the whole picture.
+// The cursor is opaque to callers — a nextPageToken on v3, a startAt on v2.
+async function searchIssues(client, jql, limit = 50, cursor = null) {
   const v = await client.apiVersion();
   const capped = Math.min(Number(limit) || 50, 200);
+
   // v3 moved search to POST /search/jql with a nextPageToken; v2 uses /search.
   if (v === "3") {
     try {
       const res = await client.api("POST", "/search/jql", {
-        body: { jql, maxResults: capped, fields: ["summary", "status", "issuetype", "assignee"] },
+        body: {
+          jql,
+          maxResults: capped,
+          fields: SEARCH_FIELDS,
+          ...(cursor ? { nextPageToken: String(cursor) } : {}),
+        },
       });
-      return res.issues || [];
+      const issues = res.issues || [];
+      const nextCursor = res.nextPageToken || null;
+      let total = Number.isFinite(res.total) ? res.total : null;
+      if (total === null && nextCursor) total = await approximateCount(client, jql);
+      return {
+        issues,
+        total,
+        next_cursor: nextCursor,
+        truncated: Boolean(nextCursor) || res.isLast === false,
+      };
     } catch {
       // Older Cloud/DC builds still serve the legacy endpoint.
     }
   }
+
+  const startAt = Number(cursor) || 0;
   const res = await client.api("POST", "/search", {
-    body: { jql, maxResults: capped, fields: ["summary", "status", "issuetype", "assignee"] },
+    body: { jql, startAt, maxResults: capped, fields: SEARCH_FIELDS },
   });
-  return res.issues || [];
+  const issues = res.issues || [];
+  const total = Number.isFinite(res.total) ? res.total : null;
+  const seen = startAt + issues.length;
+  const more = total === null ? issues.length === capped : seen < total;
+  return {
+    issues,
+    total,
+    next_cursor: more ? seen : null,
+    truncated: more,
+  };
 }
 
 async function epicChildren(client, epicKey, limit = 200) {
@@ -62,7 +108,7 @@ async function epicChildren(client, epicKey, limit = 200) {
   if (map.epicLink) clauses.unshift(`${jqlStr("Epic Link")} = ${jqlStr(epicKey)}`);
   for (const jql of clauses) {
     try {
-      const issues = await searchIssues(client, jql, limit);
+      const { issues } = await searchIssues(client, jql, limit);
       if (issues.length) return issues;
     } catch {
       // Try the next form.
@@ -105,7 +151,8 @@ async function issueTree(client, key, { maxDepth = 4, maxIssues = 200 } = {}) {
     childSource = "subtasks";
   } else {
     try {
-      children = (await searchIssues(client, `parent = ${jqlStr(root.key)}`, maxIssues)).map((r) => summarise(client, r));
+      const found = await searchIssues(client, `parent = ${jqlStr(root.key)}`, maxIssues);
+      children = found.issues.map((r) => summarise(client, r));
       childSource = children.length ? "parent-query" : null;
     } catch {
       children = [];
@@ -368,18 +415,44 @@ export const TOOLS = [
   },
   {
     name: "jira_search",
-    description: "Run a JQL query and return matching issues in summary form.",
+    description:
+      "Run a JQL query and return matching issues in summary form (no description or comments). " +
+      "Always check `total` and `truncated` in the result: one page is capped at 200 issues, so a " +
+      "broad query returns a slice, not the whole answer. When `truncated` is true, narrow the JQL " +
+      "rather than paging, unless you genuinely need the full key list; to page, pass `next_cursor` " +
+      "back in as `cursor`.",
     inputSchema: {
       type: "object",
       properties: {
-        jql: { type: "string", description: 'JQL, e.g. project = ABC AND sprint in openSprints()' },
-        limit: { type: "number", description: "Max results (default 50, cap 200)" },
+        jql: { type: "string", description: 'JQL, e.g. project in ("ABC","DEF") AND text ~ "timeout"' },
+        limit: { type: "number", description: "Max results per page (default 50, cap 200)" },
+        cursor: {
+          type: ["string", "number"],
+          description: "Opaque page cursor: pass the `next_cursor` from the previous result. Omit for the first page.",
+        },
       },
       required: ["jql"],
     },
     handler: async (client, a) => {
-      const issues = await searchIssues(client, a.jql, a.limit ?? 50);
-      return { jql: a.jql, count: issues.length, issues: issues.map((r) => summarise(client, r)) };
+      const res = await searchIssues(client, a.jql, a.limit ?? 50, a.cursor ?? null);
+      return {
+        jql: a.jql,
+        count: res.issues.length,
+        total: res.total,
+        truncated: res.truncated,
+        next_cursor: res.next_cursor,
+        ...(res.truncated
+          ? {
+              note:
+                `Only ${res.issues.length} issue(s) returned` +
+                (res.total === null ? "" : ` out of ${res.total} matching`) +
+                ". Narrow the JQL (resolution IS NOT EMPTY, updated >= -12M, component, a tighter " +
+                "phrase) instead of summarising this page as if it were the whole result. " +
+                "Pass next_cursor as `cursor` only if you need the full key list.",
+            }
+          : {}),
+        issues: res.issues.map((r) => summarise(client, r)),
+      };
     },
   },
   {

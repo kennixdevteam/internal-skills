@@ -21,10 +21,18 @@ allowed-services: 內聯 Jira only
 | **預設：讀一張 ticket** | `jira_get_issue_tree` |
 | 淨係要嗰張 ticket 本身，唔要上下文 | `jira_get_issue` |
 | 想攞 epic 下面所有 ticket | `jira_get_epic_children` |
-| 用條件搵一堆 ticket | `jira_search`（JQL） |
+| 用條件搵一堆 ticket | `jira_search`（JQL，**一定要睇 `truncated`**） |
 | 唔知某個欄位嘅 custom field id | `jira_list_fields` |
 | 想知而家可以轉去邊個 status | `jira_get_transitions` |
 | 連唔連到 / 用邊個 account | `jira_whoami` |
+
+### `jira_search` 嘅 `truncated`
+
+一頁封頂 200。條 query 闊嘅話你收到嘅係**一片**，唔係全部。所以每次 search 之後：
+
+- **`truncated: false`** → 呢個就係全部，安心用
+- **`truncated: true`** → `total` 話你知真實有幾多條。**預設反應係收窄條 JQL，唔係 page 落去。** 唔收窄就下結論，等於攞住 3000 條入面嘅 200 條當成全貌
+- 真係要攞齊個 key list（做統計、數 component）先至用 `next_cursor` 當 `cursor` 傳返入去揭下一頁
 
 **預設用 `jira_get_issue_tree`，唔好用 `jira_get_issue`。** 佢一次過做晒：
 
